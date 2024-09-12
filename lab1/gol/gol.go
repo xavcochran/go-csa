@@ -1,13 +1,13 @@
 package main
 func calculateNextState(p golParams, world [][]byte) [][]byte {
-    newWorld := make([][]byte, p.imageHeight)
+    newWorld := make([][]byte, p.imageWidth)
     for i := range newWorld {
-        newWorld[i] = make([]byte, p.imageWidth)
+        newWorld[i] = make([]byte, p.imageHeight)
     }
 
     // go through each row and column and calculate if the cell should be alive or dead
-    for i := 0; i < p.imageHeight; i++ {
-        for j := 0; j < p.imageWidth; j++ {
+    for i := 0; i < p.imageWidth; i++ {
+        for j := 0; j < p.imageHeight; j++ {
             aliveNeighbors := 0
             // check the 8 neighbors of the cell
             for x := -1; x <= 1; x++ {
@@ -16,7 +16,7 @@ func calculateNextState(p golParams, world [][]byte) [][]byte {
                         continue
                     }
                     // check if the neighbor is alive
-                    x_neighbour := (i + x + p.imageHeight) % p.imageHeight
+                    x_neighbour := (i + x + p.imageWidth) % p.imageWidth
                     y_neighbour := (j + y + p.imageHeight) % p.imageHeight
 
                     if world[x_neighbour][y_neighbour] == 255 {
@@ -44,10 +44,10 @@ func calculateNextState(p golParams, world [][]byte) [][]byte {
 
 func calculateAliveCells(p golParams, world [][]byte) []cell {
     var aliveCells []cell
-    for i := 0; i < p.imageHeight; i++ {
-        for j := 0; j < p.imageWidth; j++ {
+    for i := 0; i < p.imageWidth; i++ {
+        for j := 0; j < p.imageHeight; j++ {
             if world[i][j] == 255 {
-                aliveCells = append(aliveCells, cell{i, j})
+                aliveCells = append(aliveCells, cell{j,i})
             }
         }
     }
