@@ -63,6 +63,7 @@ func main() {
 outerLoop:
 	for _, q := range qs {
 		go ask(s, q, ch)
+	innerLoop:
 		for {
 			select {
 			case <-timer.C:
@@ -70,7 +71,7 @@ outerLoop:
 				ch <- s
 				break outerLoop
 			case s = <-ch:
-				break outerLoop
+				break innerLoop
 			}
 
 		}

@@ -13,19 +13,18 @@ func foo(channel chan string) {
 	for {
 		channel <- "ping"
 		fmt.Println("foo is sending: ping")
-		<-channel
-		fmt.Println("foo is receiving: pong")
+		receivedMessage:=<-channel
+		fmt.Println("foo is receiving:", receivedMessage)
 	}
 }
 
 func bar(channel chan string) {
 	// TODO: Write an infinite loop of receiving "pings" and sending "pongs"
 	for {
-		<-channel
-		fmt.Println("bar is receiving: ping")
+		receivedMessage:=<-channel
+		fmt.Println("bar is receiving:", receivedMessage)
 		channel <- "pong"
 		fmt.Println("bar is sending: pong")
-		fmt.Println()
 	}
 }
 

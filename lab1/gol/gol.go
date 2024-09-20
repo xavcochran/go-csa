@@ -19,22 +19,22 @@ func calculateNextState(p golParams, world [][]byte) [][]byte {
                     x_neighbour := (i + x + p.imageWidth) % p.imageWidth
                     y_neighbour := (j + y + p.imageHeight) % p.imageHeight
 
-                    if world[x_neighbour][y_neighbour] == 255 {
+                    if world[y_neighbour][x_neighbour] == 255 {
                         aliveNeighbors++
                     }
                 }
             }
-            if world[i][j] == 255 {
+            if world[j][i] == 255 {
                 if aliveNeighbors < 2 || aliveNeighbors > 3 {
-                    newWorld[i][j] = 0
+                    newWorld[j][i] = 0
                 } else {
-                    newWorld[i][j] = 255
+                    newWorld[j][i] = 255
                 }
             } else {
                 if aliveNeighbors == 3 {
-                    newWorld[i][j] = 255
+                    newWorld[j][i] = 255
                 } else {
-                    newWorld[i][j] = 0
+                    newWorld[j][i] = 0
                 }
             }
         }
@@ -44,10 +44,10 @@ func calculateNextState(p golParams, world [][]byte) [][]byte {
 
 func calculateAliveCells(p golParams, world [][]byte) []cell {
     var aliveCells []cell
-    for i := 0; i < p.imageWidth; i++ {
-        for j := 0; j < p.imageHeight; j++ {
-            if world[i][j] == 255 {
-                aliveCells = append(aliveCells, cell{j,i})
+    for i := 0; i < p.imageHeight; i++ {
+        for j := 0; j < p.imageWidth; j++ {
+            if world[j][i] == 255 {
+                aliveCells = append(aliveCells, cell{i,j})
             }
         }
     }
