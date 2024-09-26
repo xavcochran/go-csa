@@ -15,7 +15,7 @@ use tokio::{
 };
 
 pub struct Message {
-    sender: i32,
+    sender: u128,
     message: String,
 }
 
@@ -51,6 +51,7 @@ impl fmt::Display for AppError {
         }
     }
 }
+
 async fn accept_conn(ln: Arc<net::TcpListener>, conns_chan: Sender<TcpStream>) {
     loop {
         match ln.accept().await {
@@ -64,55 +65,61 @@ async fn accept_conn(ln: Arc<net::TcpListener>, conns_chan: Sender<TcpStream>) {
         }
     }
 }
-async fn handle_client(
-    clients: &mut HashMap<i32, TcpStream>,
-    client_id: i32,
-    message_chan: Sender<Message>,
-) {
-    let client = clients.remove(&client_id).unwrap();
-    let mut reader = tokio::io::BufReader::new(client);
 
+async fn handle_client(
+    clients: Arc<Mutex<HashMap<u128, TcpStream>>>,
+    client_id: u128,
+    message_chan: Sender<Message>,
+) { 
     loop {
         let mut message = String::new();
 
-        // Read the message from the client
-        match reader.read_line(&mut message).await {
-            Ok(0) => {
-                eprintln!("Client disconnected");
+        {
 
-                let mut client = reader.into_inner();
+            let mut clients_guard = clients.lock().await;
+            if let Some(client) = clients_guard.get_mut(&client_id) {
+                let mut reader = tokio::io::BufReader::new(client);
+                // Read the message from the client
+                match reader.read_line(&mut message).await {
+                    Ok(0) => {
+                        // EOF reached, client disconnected
+                        eprintln!("Client disconnected");
 
-                if let Err(e) = client.shutdown().await {
-                    eprintln!("Failed to shutdown client: {}", e);
-                }
-                break;
-            }
-            Ok(_) => {
-                println!("Message: {}", message);
-                if message.len() > 1 {
-                    let msg_obj = Message {
-                        sender: client_id,
-                        message,
-                    };
-                    match message_chan.send(msg_obj).await {
-                        Ok(_) => {}
-                        Err(e) => {
-                            eprintln!("Error sending message: {}", e);
+                        clients_guard.remove(&client_id);
+                        break;
+                    }
+                    Ok(_) => {
+                        println!("Message: {}", message);
+                        if message.len() > 1 {
+                            let msg_obj = Message {
+                                sender: client_id,
+                                message: message.clone(),
+                            };
+                            // Send the message to the message channel
+                            if let Err(e) = message_chan.send(msg_obj).await {
+                                eprintln!("Error sending message: {}", e);
+                            }
                         }
-                    };
+                    }
+                    Err(e) => {
+                        eprintln!("Error reading from client: {}", e);
+                        break;
+                    }
                 }
-            }
-            Err(e) => {
-                eprintln!("Error reading from client: {}", e);
+            } else {
+                // If the client was not found (perhaps already removed)
                 break;
             }
         }
     }
 }
 
-async fn handle_message(msg: Message, clients: &mut HashMap<i32, TcpStream>) {
-    let recipients: Vec<i32> = clients.keys().cloned().collect();
+async fn handle_message(msg: Message, clients: &mut HashMap<u128, TcpStream>) {
+    println!("Sending message {}", msg.message);
+    let recipients: Vec<u128> = clients.keys().cloned().collect();
+    println!("{:?}", recipients);
     for id in recipients {
+        println!("For id: {} and message sender {}", id, msg.sender);
         if id != msg.sender {
             let conn = clients.get_mut(&id);
             if conn.is_some() {
@@ -139,30 +146,32 @@ async fn main() -> Result<(), AppError> {
 
     let mut connection_chan: BiChan<TcpStream> = BiChan::new(400);
     let mut message_chan: BiChan<Message> = BiChan::new(3200);
-    let clients = Arc::new(Mutex::new(HashMap::<i32, TcpStream>::new()));
-
-
-
+    
+    
+    
     let connection_chan_sender = connection_chan.sender.clone(); 
     tokio::task::spawn(async move {
         accept_conn(ln, connection_chan_sender).await;
     });
-
+    
+    let clients = Arc::new(Mutex::new(HashMap::<u128, TcpStream>::new()));
     loop {
         tokio::select! {
             Some(conn) = connection_chan.receiver.recv() => {
                 // Handle new connection
-                let client_id = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros() as i32; 
+                let client_id = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros(); 
                 let clients_clone = Arc::clone(&clients);  
                 let message_chan_clone = message_chan.sender.clone(); 
-
+                let mut clients_guard = clients_clone.lock().await;
+                clients_guard.insert(client_id, conn);
+                let recipients: Vec<u128> = clients_guard.keys().cloned().collect();
+                println!("Number of clients connected: {}, Client ID: {}, item: {:?}, keys: {:?}", clients_guard.len(), client_id, clients_guard.get_key_value(&client_id).unwrap(), recipients);
+                drop(clients_guard);
+                
                 // Spawn task to handle client
                 tokio::spawn(async move {
-                    let mut clients_guard = clients_clone.lock().await;
-                    clients_guard.insert(client_id, conn);
-                    println!("Number of clients connected: {}, Client ID: {}", clients_guard.len(), client_id);
 
-                    handle_client(&mut clients_guard, client_id, message_chan_clone).await;
+                    handle_client(clients_clone, client_id, message_chan_clone).await;
                 });
 
             },
@@ -173,6 +182,7 @@ async fn main() -> Result<(), AppError> {
                 tokio::spawn(async move {
                     let mut clients_guard = clients_clone.lock().await;
                     handle_message(msg, &mut clients_guard).await;
+                    drop(clients_guard);
                 });
             }
         }

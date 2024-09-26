@@ -34,8 +34,9 @@ func handleClient(clients map[int]net.Conn, clientid int, msgs chan Message) {
 	// Tidy up each message and add it to the messages channel,
 	// recording which client it came from.
 	client := clients[clientid]
+	reader := bufio.NewReader(client)
 	for {
-		message, err := bufio.NewReader(client).ReadString('\n')
+		message, err := reader.ReadString('\n')
 		if err != nil {
 			if err.Error() == "EOF" {
 				fmt.Println("Client disconnected")
