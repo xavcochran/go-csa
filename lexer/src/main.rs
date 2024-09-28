@@ -1,5 +1,5 @@
 #[derive(Debug)]
-enum token {
+enum Token {
     TkTrue,
     TkFalse,
     TkAnd,
@@ -46,7 +46,7 @@ impl<'a> State<'a> {
         c.is_lowercase() || c.is_uppercase() || c == '\''
     }
 
-    fn lex_kw_or_id(&mut self) -> token {
+    fn lex_kw_or_id(&mut self) -> Token {
         let mut lexeme = String::new();
 
         while self.is_more() && State::is_id_char(self.peek()) {
@@ -56,45 +56,48 @@ impl<'a> State<'a> {
         }
 
         let token = match lexeme.as_str() {
-            "true" => token::TkTrue,
-            "false" => token::TkFalse,
-            _ => token::TkId(lexeme),
+            "true" => Token::TkTrue,
+            "false" => Token::TkFalse,
+            _ => Token::TkId(lexeme),
         };
 
         token
     }
-
 }
 
 fn main() {
-    let s = "foo && true || (false && bar)"; 
+    let s = "foo && true || (false && bar)";
     let mut state = State::init(s);
-    let mut tokens: Vec<token> = Vec::new();
+    let mut tokens: Vec<Token> = Vec::new();
 
     while state.is_more() {
         match state.peek() {
             '(' => {
                 state.eat('(');
-                tokens.push(token::TkLParen);
+                tokens.push(Token::TkLParen);
             }
             ')' => {
                 state.eat(')');
-                tokens.push(token::TkRParen);
+                tokens.push(Token::TkRParen);
             }
             '&' => {
                 state.eat('&');
                 state.eat('&');
-                tokens.push(token::TkAnd);
+                tokens.push(Token::TkAnd);
             }
             '|' => {
                 state.eat('|');
                 state.eat('|');
-                tokens.push(token::TkOr);
+                tokens.push(Token::TkOr);
             }
 
             c => {
                 if c.is_lowercase() {
-                    tokens.push(state.lex_kw_or_id()); 
+                    let token = state.lex_kw_or_id();
+                    if let Token::TkId(ref id) = token {
+                        println!("Identifier found: {}", id);
+                    }
+                    tokens.push(token);
                 }
                 if c.is_whitespace() {
                     state.eat(c);
@@ -104,9 +107,8 @@ fn main() {
             }
         }
     }
-    tokens.push(token::TkEnd);
+    tokens.push(Token::TkEnd);
     // tokens.reverse(); // don't need because push appends to end of list
 
     println!("{:?}", tokens);
-
 }
