@@ -1,6 +1,8 @@
 {
     "rust-analyzer.linkedProjects": [
         "client_server/client/Cargo.toml",
-        "client_server/server/Cargo.toml"
-    ]
+        "client_server/server/Cargo.toml",
+        "lexer/Cargo.toml"
+    ],
+    "rust-analyzer.procMacro.server": null
 }

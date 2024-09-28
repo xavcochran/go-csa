@@ -6,7 +6,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt},
-    net::{self, TcpStream},
+    net::{self, tcp::{OwnedReadHalf, OwnedWriteHalf}, TcpStream},
     sync::{
         self,
         mpsc::{Receiver, Sender},
@@ -32,6 +32,24 @@ impl<T> BiChan<T> {
         BiChan { sender, receiver }
     }
 }
+
+pub struct Clients<T> {
+    connections: HashMap<u128, T>,
+}
+
+impl<T> Clients<T> {
+    fn new() -> Self {
+        let connections = HashMap::new();
+        Clients {
+            connections
+        }
+    }
+}
+
+
+
+// i dont think having all clients in single struct will work because of ownership between loops, might need to have 2 separate structs.
+
 
 #[derive(Debug)]
 pub enum AppError {
@@ -67,7 +85,8 @@ async fn accept_conn(ln: Arc<net::TcpListener>, conns_chan: Sender<TcpStream>) {
 }
 
 async fn handle_client(
-    clients: Arc<Mutex<HashMap<u128, TcpStream>>>,
+    r_clients: Arc<Mutex<Clients<OwnedReadHalf>>>,
+    w_clients: Arc<Mutex<Clients<OwnedWriteHalf>>>,
     client_id: u128,
     message_chan: Sender<Message>,
 ) { 
@@ -76,16 +95,20 @@ async fn handle_client(
 
         {
 
-            let mut clients_guard = clients.lock().await;
-            if let Some(client) = clients_guard.get_mut(&client_id) {
+            let mut clients_guard = r_clients.lock().await;
+            if let Some(client) = clients_guard.connections.get_mut(&client_id) {
                 let mut reader = tokio::io::BufReader::new(client);
                 // Read the message from the client
                 match reader.read_line(&mut message).await {
                     Ok(0) => {
                         // EOF reached, client disconnected
                         eprintln!("Client disconnected");
+                        let mut w_clients_guard = w_clients.lock().await;
+                        drop(w_clients_guard.connections.remove(&client_id).unwrap());
+                        drop(w_clients_guard);
+                        drop(clients_guard.connections.remove(&client_id).unwrap());
+                        drop(clients_guard);
 
-                        clients_guard.remove(&client_id);
                         break;
                     }
                     Ok(_) => {
@@ -114,19 +137,23 @@ async fn handle_client(
     }
 }
 
-async fn handle_message(msg: Message, clients: &mut HashMap<u128, TcpStream>) {
+async fn handle_message(msg: Message, clients: Arc<Mutex<Clients<OwnedWriteHalf>>>) {
     println!("Sending message {}", msg.message);
-    let recipients: Vec<u128> = clients.keys().cloned().collect();
+    let client_guard = clients.lock().await;
+    let recipients: Vec<u128> = client_guard.connections.keys().cloned().collect();
     println!("{:?}", recipients);
+    drop(client_guard);
     for id in recipients {
         println!("For id: {} and message sender {}", id, msg.sender);
         if id != msg.sender {
-            let conn = clients.get_mut(&id);
+            let mut clients_guard = clients.lock().await;
+            let conn = clients_guard.connections.get_mut(&id);
             if conn.is_some() {
                 if let Err(e) = conn.unwrap().write_all(msg.message.as_bytes()).await {
                     eprintln!("Failed to send message to client {}: {}", id, e);
                 }
             }
+            drop(clients_guard);
         }
     }
 }
@@ -144,8 +171,8 @@ async fn main() -> Result<(), AppError> {
         }
     };
 
-    let mut connection_chan: BiChan<TcpStream> = BiChan::new(400);
-    let mut message_chan: BiChan<Message> = BiChan::new(3200);
+    let mut connection_chan: BiChan<TcpStream> = BiChan::new(40000);
+    let mut message_chan: BiChan<Message> = BiChan::new(320000);
     
     
     
@@ -154,35 +181,42 @@ async fn main() -> Result<(), AppError> {
         accept_conn(ln, connection_chan_sender).await;
     });
     
-    let clients = Arc::new(Mutex::new(HashMap::<u128, TcpStream>::new()));
+    // let clients = Arc::new(Mutex::new(HashMap::<u128, TcpStream>::new()));
+    let r_clients: Arc<Mutex<Clients<OwnedReadHalf>>> = Arc::new(Mutex::new(Clients::new()));
+    let w_clients: Arc<Mutex<Clients<OwnedWriteHalf>>> = Arc::new(Mutex::new(Clients::new()));
     loop {
         tokio::select! {
             Some(conn) = connection_chan.receiver.recv() => {
                 // Handle new connection
+                let (r_conn, w_conn) = conn.into_split();
+
                 let client_id = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros(); 
-                let clients_clone = Arc::clone(&clients);  
                 let message_chan_clone = message_chan.sender.clone(); 
-                let mut clients_guard = clients_clone.lock().await;
-                clients_guard.insert(client_id, conn);
-                let recipients: Vec<u128> = clients_guard.keys().cloned().collect();
-                println!("Number of clients connected: {}, Client ID: {}, item: {:?}, keys: {:?}", clients_guard.len(), client_id, clients_guard.get_key_value(&client_id).unwrap(), recipients);
-                drop(clients_guard);
+                
+                let r_clients_clone = Arc::clone(&r_clients);  
+                let mut r_clients_guard = r_clients_clone.lock().await;
+                r_clients_guard.connections.insert(client_id, r_conn);
+                let recipients: Vec<u128> = r_clients_guard.connections.keys().cloned().collect();
+                println!("Number of clients connected: {}, Client ID: {}, item: {:?}, keys: {:?}", r_clients_guard.connections.len(), client_id, r_clients_guard.connections.get_key_value(&client_id).unwrap(), recipients);
+                drop(r_clients_guard);
+
+                let w_clients_clone = Arc::clone(&w_clients);
+                let mut w_clients_guard = w_clients_clone.lock().await;
+                w_clients_guard.connections.insert(client_id, w_conn);
+                drop(w_clients_guard);
                 
                 // Spawn task to handle client
                 tokio::spawn(async move {
-
-                    handle_client(clients_clone, client_id, message_chan_clone).await;
+                    handle_client(r_clients_clone, w_clients_clone, client_id, message_chan_clone).await;
                 });
 
             },
             Some(msg) = message_chan.receiver.recv() => {
                 println!("{}", msg.message);
-                let clients_clone = Arc::clone(&clients);
-
+                let clients_clone = Arc::clone(&w_clients);
                 tokio::spawn(async move {
-                    let mut clients_guard = clients_clone.lock().await;
-                    handle_message(msg, &mut clients_guard).await;
-                    drop(clients_guard);
+                    handle_message(msg, clients_clone).await;
+                    
                 });
             }
         }
