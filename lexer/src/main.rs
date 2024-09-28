@@ -98,11 +98,11 @@ fn main() {
                         println!("Identifier found: {}", id);
                     }
                     tokens.push(token);
-                }
-                if c.is_whitespace() {
+                } else if c.is_whitespace() {
                     state.eat(c);
                 } else {
-                    eprintln!("Did not exect to find {}", c)
+                    eprintln!("Did not exect to find {}", c);
+                    break;
                 }
             }
         }
