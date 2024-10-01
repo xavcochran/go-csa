@@ -2,7 +2,9 @@
     "rust-analyzer.linkedProjects": [
         "client_server/client/Cargo.toml",
         "client_server/server/Cargo.toml",
-        "lexer/Cargo.toml"
+        "lexer/rust/Cargo.toml",
+        "**/Cargo.toml"
     ],
-    "rust-analyzer.procMacro.server": null
+    "rust-analyzer.procMacro.server": null,
+    "rust-analyzer.cargo.buildScripts.overrideCommand": null
 }
