@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Token {
     TkTrue,
     TkFalse,
@@ -10,16 +10,18 @@ enum Token {
     TkEnd,
 }
 
-// struct state then impl functions below
-struct State<'a> {
+
+
+// struct LexState then impl functions below
+struct LexState<'a> {
     idx: usize,
     input: &'a str,
     input_len: usize,
 }
 
-impl<'a> State<'a> {
+impl<'a> LexState<'a> {
     fn init(s: &'a str) -> Self {
-        State {
+        LexState {
             idx: 0,
             input: s,
             input_len: s.len(),
@@ -49,7 +51,7 @@ impl<'a> State<'a> {
     fn lex_kw_or_id(&mut self) -> Token {
         let mut lexeme = String::new();
 
-        while self.is_more() && State::is_id_char(self.peek()) {
+        while self.is_more() && LexState::is_id_char(self.peek()) {
             let c = self.peek();
             self.eat(c);
             lexeme.push(c);
@@ -65,41 +67,41 @@ impl<'a> State<'a> {
     }
 }
 
-fn main() {
+fn lex() -> Vec<Token> {
     let s = "foo && true || (false && bar)";
-    let mut state = State::init(s);
+    let mut lex_state = LexState::init(s);
     let mut tokens: Vec<Token> = Vec::new();
 
-    while state.is_more() {
-        match state.peek() {
+    while lex_state.is_more() {
+        match lex_state.peek() {
             '(' => {
-                state.eat('(');
+                lex_state.eat('(');
                 tokens.push(Token::TkLParen);
             }
             ')' => {
-                state.eat(')');
+                lex_state.eat(')');
                 tokens.push(Token::TkRParen);
             }
             '&' => {
-                state.eat('&');
-                state.eat('&');
+                lex_state.eat('&');
+                lex_state.eat('&');
                 tokens.push(Token::TkAnd);
             }
             '|' => {
-                state.eat('|');
-                state.eat('|');
+                lex_state.eat('|');
+                lex_state.eat('|');
                 tokens.push(Token::TkOr);
             }
 
             c => {
                 if c.is_lowercase() {
-                    let token = state.lex_kw_or_id();
+                    let token = lex_state.lex_kw_or_id();
                     if let Token::TkId(ref id) = token {
                         println!("Identifier found: {}", id);
                     }
                     tokens.push(token);
                 } else if c.is_whitespace() {
-                    state.eat(c);
+                    lex_state.eat(c);
                 } else {
                     eprintln!("Did not exect to find {}", c);
                     break;
@@ -111,4 +113,48 @@ fn main() {
     // tokens.reverse(); // don't need because push appends to end of list
 
     println!("{:?}", tokens);
+    tokens
+}
+
+
+struct ParseState {
+    input: Vec<Token>,
+    index: usize
+}
+
+impl ParseState {
+    fn init(tokens: Vec<Token>) -> Self{
+        ParseState{
+            input: tokens,
+            index: 0
+        }
+    }
+
+    // borrowed as should not be 'taken out' and owned by calling scope
+    fn peek(&self) -> &Token {
+        let token = &self.input[self.index];
+        token
+    }
+
+    fn eat(&mut self, t: &Token) {
+        if self.peek() == t {
+            self.index += 1;
+        } else {
+            eprintln!("Expected {:?}", t);
+        }
+    }
+}
+
+fn parse(t: Vec<Token>) {
+    let parser = ParseState::init(t);
+
+    
+}
+
+
+
+
+pub fn main() {
+    lex();
+
 }
