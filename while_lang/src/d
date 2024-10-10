@@ -1,0 +1,32 @@
+Prog -> Stmt Stmts $
+Stmt -> if BExp then Stmt else Stmt
+Stmt -> while BExp do Stmt
+Stmt -> skip
+Stmt -> id := AExp
+Stmt -> { Stmt Stmts }
+Stmts -> ; Stmt Stmts
+Stmts -> ''
+BExp -> BFac BExps
+BExps -> || BFac BExps
+BExps -> ''
+BFac -> BNeg BFacs
+BFacs -> && BNeg BFacs
+BFacs -> ''
+BNeg -> ! BNeg
+BNeg -> BRel
+BRel -> AExp BRels
+BRels -> < AExp
+BRels -> = AExp
+BRels -> ''
+AExp -> AFac AExps
+AExps -> + AFac AExps
+AExps -> - AFac AExps
+AExps -> ''
+AFac -> Atom AFacs
+AFacs -> * Atom AFacs
+AFacs -> ''
+Atom -> true
+Atom -> false
+Atom -> id
+Atom -> num
+Atom -> ( BExp )
