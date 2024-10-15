@@ -17,17 +17,16 @@ enum Terminals {
     And,
     Or,
     Bang,
-    Num(String),
+    Num(u32),
     LParen,
     RParen,
     LBracket,
     RBracket,
     SemiColon,
     LArrow,
-    EndSymbol
+    // Empty,
+    EndSymbol,
 }
-
-
 
 struct LexState<'a> {
     idx: usize,
@@ -96,8 +95,8 @@ impl<'a> LexState<'a> {
             self.eat(c);
             lexeme.push(c);
         }
-
-        Terminals::Num(lexeme)
+        let number = lexeme.parse::<u32>().unwrap();
+        Terminals::Num(number)
     }
 }
 
@@ -167,9 +166,9 @@ fn lex() -> Vec<Terminals> {
                 lex_state.eat('}');
                 tokens.push(Terminals::RBracket);
             }
-        
+
             c => {
-                if c.is_numeric() { 
+                if c.is_numeric() {
                     let token = lex_state.lex_num();
                     if let Terminals::Num(ref num) = token {
                         println!("Number found: {}", num);
@@ -191,7 +190,6 @@ fn lex() -> Vec<Terminals> {
         }
     }
     tokens.push(Terminals::EndSymbol);
-
 
     println!("{:?}", tokens);
     tokens
@@ -275,8 +273,14 @@ impl ParseState {
                 self.parse_stmt();
                 self.parse_stmts();
             }
-            t => {
-                self.eat(t);
+            Terminals::EndSymbol => {
+                self.eat(Terminals::EndSymbol);
+            }
+            Terminals::RBracket => {
+                self.eat(Terminals::RBracket);
+            }
+            _ => {
+                eprintln!("Expected statement");
             }
         }
     }
@@ -285,59 +289,231 @@ impl ParseState {
         match self.peek() {
             Terminals::Id(c) => {
                 self.eat(Terminals::Id(c));
-                self.parse_b_rel();
+                self.parse_b_fac();
+                self.parse_b_exps();
+            }
+            Terminals::Bang => {
+                self.eat(Terminals::Bang);
+                self.parse_b_fac();
+                self.parse_b_exps();
+            }
+            Terminals::True => {
+                self.eat(Terminals::True);
+                self.parse_b_fac();
+                self.parse_b_exps();
+            }
+            Terminals::False => {
+                self.eat(Terminals::False);
+                self.parse_b_fac();
+                self.parse_b_exps();
+            }
+            Terminals::Num(n) => {
+                self.eat(Terminals::Num(n));
+                self.parse_b_fac();
+                self.parse_b_exps();
+            }
+            Terminals::LParen => {
+                self.eat(Terminals::LParen);
+                self.parse_b_fac();
+                self.parse_b_exps();
+            }
+            _ => {
+                eprintln!("Expected boolean expression");
             }
         }
     }
 
     fn parse_b_exps(&mut self) {
-
+        match self.peek() {
+            Terminals::Then => {
+                self.eat(Terminals::Then);
+            }
+            Terminals::Do => {
+                self.eat(Terminals::Do);
+            }
+            Terminals::Or => {
+                self.eat(Terminals::Or);
+                self.parse_b_fac();
+                self.parse_b_exps();
+            }
+            Terminals::RParen => {
+                self.eat(Terminals::RParen);
+            }
+            _ => {
+                eprintln!("Expected boolean expressions");
+            }
+        }
     }
 
     fn parse_b_fac(&mut self) {
-
+        match self.peek() {
+            Terminals::Id(c) => {
+                self.eat(Terminals::Id(c));
+                self.parse_b_neg();
+                self.parse_b_facs();
+            }
+            Terminals::Bang => {
+                self.eat(Terminals::Bang);
+                self.parse_b_neg();
+                self.parse_b_facs();
+            }
+            Terminals::True => {
+                self.eat(Terminals::True);
+                self.parse_b_neg();
+                self.parse_b_facs();
+            }
+            Terminals::False => {
+                self.eat(Terminals::False);
+                self.parse_b_neg();
+                self.parse_b_facs();
+            }
+            Terminals::Num(n) => {
+                self.eat(Terminals::Num(n));
+                self.parse_b_neg();
+                self.parse_b_facs();
+            }
+            Terminals::LParen => {
+                self.eat(Terminals::LParen);
+                self.parse_b_neg();
+                self.parse_b_facs();
+            }
+            _ => {
+                eprintln!("Expected boolean factor");
+            }
+        }
     }
 
     fn parse_b_facs(&mut self) {
-
+        match self.peek() {
+            Terminals::Then => {
+                self.eat(Terminals::Then);
+            }
+            Terminals::Do => {
+                self.eat(Terminals::Do);
+            }
+            Terminals::Or => {
+                self.eat(Terminals::Or);
+            }
+            Terminals::And => {
+                self.eat(Terminals::And);
+                self.parse_b_neg();
+                self.parse_b_facs();
+            }
+            Terminals::RParen => {
+                self.eat(Terminals::RParen);
+            }
+            _ => {
+                eprintln!("Expected boolean factors");
+            }
+        }
     }
 
     fn parse_b_neg(&mut self) {
-
+        match self.peek() {
+            Terminals::Id(c) => {
+                self.eat(Terminals::Id(c));
+                self.parse_b_rel();
+            }
+            Terminals::Bang => {
+                self.eat(Terminals::Bang);
+                self.parse_b_neg();
+            }
+            Terminals::True => {
+                self.eat(Terminals::True);
+                self.parse_b_rel();
+            }
+            Terminals::False => {
+                self.eat(Terminals::False);
+                self.parse_b_rel();
+            }
+            Terminals::Num(n) => {
+                self.eat(Terminals::Num(n));
+                self.parse_b_rel();
+            }
+            Terminals::LParen => {
+                self.eat(Terminals::LParen);
+                self.parse_b_rel();
+            }
+            _ => {
+                eprintln!("Expected boolean negation");
+            }
+        }
     }
 
     fn parse_b_rel(&mut self) {
-
+        match self.peek() {
+            Terminals::Id(c) => {
+                self.eat(Terminals::Id(c));
+                self.parse_a_exp();
+                self.parse_b_rels();
+            }
+            Terminals::True => {
+                self.eat(Terminals::True);
+                self.parse_a_exp();
+                self.parse_b_rels();
+            }
+            Terminals::False => {
+                self.eat(Terminals::False);
+                self.parse_a_exp();
+                self.parse_b_rels();
+            }
+            Terminals::Num(n) => {
+                self.eat(Terminals::Num(n));
+                self.parse_a_exp();
+                self.parse_b_rels();
+            }
+            Terminals::LParen => {
+                self.eat(Terminals::LParen);
+                self.parse_a_exp();
+                self.parse_b_rels();
+            }
+            _ => {
+                eprintln!("Expected boolean relation");
+            }
+        }
     }
 
     fn parse_b_rels(&mut self) {
-
+        match self.peek() {
+            Terminals::Then => {
+                self.eat(Terminals::Then);
+            }
+            Terminals::Do => {
+                self.eat(Terminals::Do);
+            }
+            Terminals::Or => {
+                self.eat(Terminals::Or);
+            }
+            Terminals::And => {
+                self.eat(Terminals::And);
+            }
+            Terminals::LessThan => {
+                self.eat(Terminals::LessThan);
+                self.parse_a_exp();
+            }
+            Terminals::Equals => {
+                self.eat(Terminals::Equals);
+                self.parse_a_exp();
+            }
+            Terminals::RParen => {
+                self.eat(Terminals::RParen);
+            }
+            _ => {
+                eprintln!("Expected boolean relations");
+            }
+        }
     }
 
-    fn parse_a_exp(&mut self) {
+    fn parse_a_exp(&mut self) {}
 
-    }
+    fn parse_a_exps(&mut self) {}
 
-    fn parse_a_exps(&mut self) {
+    fn parse_a_fac(&mut self) {}
 
-    }
+    fn parse_a_facs(&mut self) {}
 
-    fn parse_a_fac(&mut self) {
-
-    }
-
-    fn parse_a_facs(&mut self) {
-
-    }
-
-    fn parse_atom(&mut self) {
-
-    }
+    fn parse_atom(&mut self) {}
 }
-
-
-
-
 
 fn main() {
     println!("Hello, world!");

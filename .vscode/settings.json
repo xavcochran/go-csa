@@ -1,12 +1,16 @@
 {
     "rust-analyzer.linkedProjects": [
+
         "client_server/client/Cargo.toml",
         "client_server/server/Cargo.toml",
         "lexer/rust/Cargo.toml",
-        "while_lang/Cargo.toml"
+        "while_lang/Cargo.toml",
+        "cw/decoder/Cargo.toml",
+        "cw/test_yar/Cargo.toml",
     ],
     "rust-analyzer.procMacro.server": null,
     "rust-analyzer.cargo.buildScripts.overrideCommand": null,
     "rust-analyzer.inlayHints.typeHints.hideClosureInitialization": true,
     "rust-analyzer.workspace.discoverConfig": null,
+    "rust-analyzer.runnables.extraEnv": null,
 }
