@@ -132,10 +132,6 @@ impl Packet {
     }
 }
 
-use std::fs::File;
-use std::io::prelude::*;
-use std::path::Path;
-
 fn main() {
     let mut world: Vec<u8> = Vec::with_capacity(512 * 512);
     let mut buffer: u32 = 0;

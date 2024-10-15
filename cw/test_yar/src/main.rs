@@ -1,8 +1,7 @@
 use serde::{Serialize, Deserialize};
 use serde_json::{to_string, from_str};
 use std::{collections::HashSet, time::Instant};
-use std::mem
-
+use std::mem;
 #[derive(Serialize, Deserialize, Debug, Eq, Hash, PartialEq)]
 struct Cell {
     x: u32,
@@ -19,7 +18,7 @@ fn main() {
     let mut cells: HashSet<Cell> = HashSet::with_capacity(512 * 512);
 
     for x in 0..512 {
-        for y in 0..512 {
+        for y in 0..12 {
             cells.insert(Cell { x, y });
         }
     }
@@ -39,8 +38,9 @@ fn main() {
     // Extract the vector of cells from the deserialized World struct
     let elapsed = now.elapsed();
     let deserialized_cells = deserialized_world.cells;
-    
+
     println!("{}", deserialized_cells.len());
+    println!("{:?}", mem::size_of::<HashSet<Cell>>());
     println!(
         "cells processed in {:.2?} seconds",
         elapsed
