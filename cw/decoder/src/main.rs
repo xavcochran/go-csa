@@ -76,11 +76,11 @@ struct Packet {
 impl Packet {
     fn decode_header(&mut self, data: &[u8]) {
         self.header = Header {
-            version: data[VERSION],
-            fn_call: data[FUNCTION_CALL],
-            msg_id: ((data[MESSAGE_ID] as u16) << BYTE | (data[MESSAGE_ID + 1] as u16)),
-            length: ((data[LENGTH] as u32) << BYTE | (data[LENGTH + 3] as u32)),
-            checksum: ((data[CHECKSUM] as u16) << BYTE | (data[CHECKSUM + 1] as u16)),
+            version: data[VERSION], // first byte
+            fn_call: data[FUNCTION_CALL], // second byte
+            msg_id: ((data[MESSAGE_ID] as u16) << BYTE | (data[MESSAGE_ID + 1] as u16)), // 3rd & 4th byte
+            length: ((data[LENGTH] as u32) << BYTE | (data[LENGTH + 3] as u32)), // 5th -> 8th byte
+            checksum: ((data[CHECKSUM] as u16) << BYTE | (data[CHECKSUM + 1] as u16)), // 9th & 10th byte
         }
     }
 
@@ -88,31 +88,26 @@ impl Packet {
         let mut buffer: u32 = 0;
         let mut bit_count = 7;
         let size = self.header.length as usize;
-        println!("{:?}", self.header);
         let mut cells = HashSet::with_capacity(size);
 
         for byte in data {
-            // println!("byt {:032b}", (*byte as u32));
             buffer |= (*byte as u32) << 31 - bit_count; // adds next byte to the buffer
-                                                        // println!("buf {:032b}", buffer);
             bit_count += BYTE;
-            while bit_count >= 24 {
-                let extracted_value = (buffer & 0xFFFFC000) >> 14;
 
-                // println!("exp {:032b} \n", extracted_value);
-                let x = extracted_value & 0x3FF00;
-                let y = extracted_value & 0x1FF;
-                // println!("XY: {}{}", x >> 9,y);
+            // while there is no space to shift, process first 18 bits
+            while bit_count >= 24 {
+                let extracted_value = (buffer & 0xFFFFC000) >> 14; // get first 18 bits then shift to right hand side
+
                 cells.insert(extracted_value);
+
                 buffer <<= 18; // shift buffer to the right by 18 bits
                 bit_count -= 18; // decrease bit count to account for bits just extracted
             }
         }
         return cells;
     }
-    // 000000001 000000001
-    // 000000010 000000010
-    // 000000010 000000010
+
+
     pub async fn decode(&mut self, mut stream: TcpStream) -> HashSet<u32> {
         let mut buf = BytesMut::with_capacity(64);
 
@@ -142,12 +137,12 @@ use std::io::prelude::*;
 use std::path::Path;
 
 fn main() {
-    let mut world: Vec<u8> = Vec::with_capacity(512*512);
+    let mut world: Vec<u8> = Vec::with_capacity(512 * 512);
     let mut buffer: u32 = 0;
     let mut bit_count: usize = 17;
     let mask: u32 = 0xFF000000;
     for x in 0..512 as u32 {
-        for y in 0..14 as u32 {
+        for y in 0..512 as u32 {
             let new_num: u32 = x << 9 as u32 | y;
             let shifted_num = new_num << 31 - bit_count;
             buffer = buffer | shifted_num;
@@ -169,14 +164,8 @@ fn main() {
         world.push(byte as u8);
         buffer <<= BYTE;
     }
-    // 00000000000000000000010000000011
-    // 00000000000000000100000000110000
-    // 00000000100000000100000000110000
 
     println!("size {}", world.len());
-    // for cell in &world {
-    //     println!("cell {:08b}", cell);
-    // }
 
     let header = Header {
         version: 0,
@@ -186,14 +175,13 @@ fn main() {
         checksum: 0,
     };
 
-    let mut packet = Packet { header: header };
+    let mut packet = Packet { header };
     println!("{:?}", packet);
     let mut cells_processed = 0;
     let now = Instant::now();
     let cells = packet.decode_payload(&world);
     let elapsed = now.elapsed();
     for cell in &cells {
-        // println!("CELLS {:032b}", cell);
         let x = (cell & 0x3FF00) >> 9;
         let y = cell & 0x1FF;
         if x == 511 && y == 511 {
@@ -210,9 +198,3 @@ fn main() {
         cells_processed, elapsed
     );
 }
-
-// 00000000000001 001001100 011010100
-// 00000000000000001001100000000000
-// 00000000000000000000000011010100
-
-// 001100100 001100100
