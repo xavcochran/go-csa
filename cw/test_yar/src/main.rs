@@ -16,21 +16,21 @@ struct World {
 fn main() {
     // Generate an array of numbers from 0 to 511
     let mut cells: HashSet<Cell> = HashSet::with_capacity(512 * 512);
-
+    
     for x in 0..512 {
-        for y in 0..12 {
-            cells.insert(Cell { x, y });
+        for y in 0..512 {
+            
         }
     }
-
+    
     let world = World { cells };
-
+    
     // Serialize the world to a JSON string
     let json = to_string(&world).unwrap();
-
+    
     // Print the JSON string
     let now = Instant::now();
-
+    
     
     // Deserialize the JSON string back into a World struct
     let deserialized_world: World = from_str(&json).unwrap();
@@ -40,7 +40,9 @@ fn main() {
     let deserialized_cells = deserialized_world.cells;
 
     println!("{}", deserialized_cells.len());
-    println!("{:?}", mem::size_of::<HashSet<Cell>>());
+    println!("{:?}", mem::size_of::<String>());
+    println!("{}", json.len() * mem::size_of::<String>() );
+
     println!(
         "cells processed in {:.2?} seconds",
         elapsed

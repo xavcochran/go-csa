@@ -1,7 +1,8 @@
 use bytes::{buf, BytesMut};
 use indexmap::IndexSet;
-use std::cell;
+use std::fmt::Error;
 use std::time::Instant;
+use std::{cell, fmt};
 use std::{fs::read, vec};
 use tokio::{io::AsyncReadExt, net::TcpStream};
 // originally used standard hashset but doesnt have order
@@ -13,37 +14,26 @@ const HEADER_SIZE_BYTES: usize = 8;
 const VERSION: usize = 0;
 const FUNCTION_CALL: usize = 1;
 const MESSAGE_ID: usize = 2;
-const LENGTH: usize = 4;
-const CHECKSUM: usize = 6;
+const IMAGE_SIZE: usize = 4;
+const LENGTH: usize = 6;
+const CHECKSUM: usize = 10;
 
 const PGM_LINE_SIZE: usize = 512;
 const NUM_OF_U64_PER_PGM_LINE: usize = PGM_LINE_SIZE / 64;
 
-pub fn quicksort<T: Ord>(arr: &mut [T]) {
-    _quicksort(arr, 0, (arr.len() - 1) as isize);
+#[derive(Debug)]
+pub enum DecodeError {
+    Io(std::io::Error),
+    Other(String),
 }
-fn _quicksort<T: Ord>(arr: &mut [T], left: isize, right: isize) {
-    if left <= right {
-        let partition_idx = partition(arr, 0, right);
 
-        _quicksort(arr, left, partition_idx - 1);
-        _quicksort(arr, partition_idx + 1, right);
-    }
-}
-fn partition<T: Ord>(arr: &mut [T], left: isize, right: isize) -> isize {
-    let pivot = right;
-    let mut i: isize = left as isize - 1;
-
-    for j in left..=right - 1 {
-        if arr[j as usize] <= arr[pivot as usize] {
-            i += 1;
-            arr.swap(i as usize, j as usize);
+impl fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DecodeError::Io(e) => write!(f, "IO error: {}", e),
+            DecodeError::Other(msg) => write!(f, "Error: {}", msg),
         }
     }
-
-    arr.swap((i + 1) as usize, pivot as usize);
-
-    i + 1
 }
 
 #[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
@@ -83,6 +73,7 @@ struct Header {
     version: u8,
     fn_call: u8,
     msg_id: u16,
+    image_size: u16,
     length: u32,
     checksum: u16,
 }
@@ -93,6 +84,7 @@ impl Header {
             version: 0,
             fn_call: 0,
             msg_id: 0,
+            image_size: 0,
             length: 0,
             checksum: 0,
         }
@@ -110,8 +102,18 @@ impl Packet {
             version: data[VERSION],       // first byte
             fn_call: data[FUNCTION_CALL], // second byte
             msg_id: ((data[MESSAGE_ID] as u16) << BYTE | (data[MESSAGE_ID + 1] as u16)), // 3rd & 4th byte
-            length: ((data[LENGTH] as u32) << BYTE | (data[LENGTH + 3] as u32)), // 5th -> 8th byte
-            checksum: ((data[CHECKSUM] as u16) << BYTE | (data[CHECKSUM + 1] as u16)), // 9th & 10th byte
+            image_size: ((data[IMAGE_SIZE] as u16) << BYTE | (data[IMAGE_SIZE + 1] as u16)), // 5th & 6th byte
+            // 7th -> 10th byte
+            length: || -> u32{
+                let mut buf: u32 = 0;
+                for byte in &data[LENGTH..LENGTH + 3] {
+                    let mut bitcount = 7;
+                    buf |= (*byte as u32) << 31 - bitcount;
+                    bitcount += byte;
+                }
+                return buf;
+            }(),
+            checksum: ((data[CHECKSUM] as u16) << BYTE | (data[CHECKSUM + 1] as u16)), // 11th & 12th byte
         }
     }
 
@@ -138,25 +140,29 @@ impl Packet {
         return cells;
     }
 
-    pub async fn decode(&mut self, mut stream: TcpStream) -> IndexSet<u32> {
-        let mut buf = BytesMut::with_capacity(64);
+    pub async fn decode(&mut self, mut stream: TcpStream) -> Result<IndexSet<u32>, DecodeError> {
+        let mut buf = BytesMut::with_capacity(10);
 
         match stream.read_buf(&mut buf).await {
             Ok(0) => {
-                return IndexSet::new();
+                return Ok(IndexSet::new());
             }
             Ok(n) => {
-                if n != 64 {
-                    println!("there has been an size miss match streaming this line of data");
-                    return IndexSet::new();
+                if n != 10 {
+                    return Err(DecodeError::Other(format!(
+                        "Length missmatch, expected headersize of 10, got {}",
+                        n
+                    )));
                 } else {
                     self.decode_header(&buf);
-                    return self.decode_payload(&buf);
+                    return Ok(IndexSet::new());
                 }
             }
             Err(e) => {
-                println!("Failed to read from socket; err = {:?}", e);
-                return IndexSet::new();
+                return Err(DecodeError::Other(format!(
+                    "Failed to read from socket; err = {:?}",
+                    e
+                )));
             }
         }
     }
@@ -165,7 +171,7 @@ impl Packet {
         let mut buffer: u32 = 0;
         let mut bit_count: usize = 17;
         let mask: u32 = 0xFF000000;
-        let capacity = cells.len()as f64*2.25;
+        let capacity = cells.len() as f64 * 2.25;
         let mut data = Vec::with_capacity(capacity as usize);
         for cell in cells {
             buffer |= cell << 31 - bit_count;
@@ -183,7 +189,7 @@ impl Packet {
             data.push(byte as u8);
             buffer <<= BYTE;
         }
-       data
+        data
     }
 }
 
@@ -222,6 +228,7 @@ fn main() {
         version: 0,
         fn_call: 0,
         msg_id: 0,
+        image_size: 512,
         length: world.len().clone() as u32,
         checksum: 0,
     };
@@ -249,10 +256,7 @@ fn main() {
     let now = Instant::now();
     let new_payload = packet.encode_payload(cells);
     let elapsed = now.elapsed();
-    println!(
-        "encoded cells processed in {:.2?} seconds",
-        elapsed
-    );
+    println!("encoded cells processed in {:.2?} seconds", elapsed);
     println!("{:?}", packet);
     let mut cells_processed = 0;
     let now = Instant::now();

@@ -1,0 +1,7 @@
+[package]
+name = "test_u32"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+indexmap = "2.6.0"

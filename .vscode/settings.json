@@ -7,6 +7,7 @@
         "while_lang/Cargo.toml",
         "cw/decoder/Cargo.toml",
         "cw/test_yar/Cargo.toml",
+        "cw/test_u32/Cargo.toml",
     ],
     "rust-analyzer.procMacro.server": null,
     "rust-analyzer.cargo.buildScripts.overrideCommand": null,
