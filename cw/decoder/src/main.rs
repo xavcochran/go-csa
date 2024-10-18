@@ -104,7 +104,7 @@ impl Packet {
             msg_id: ((data[MESSAGE_ID] as u16) << BYTE | (data[MESSAGE_ID + 1] as u16)), // 3rd & 4th byte
             image_size: ((data[IMAGE_SIZE] as u16) << BYTE | (data[IMAGE_SIZE + 1] as u16)), // 5th & 6th byte
             // 7th -> 10th byte
-            length: || -> u32{
+            length: || -> u32 {
                 let mut buf: u32 = 0;
                 for byte in &data[LENGTH..LENGTH + 3] {
                     let mut bitcount = 7;
@@ -117,24 +117,30 @@ impl Packet {
         }
     }
 
-    fn decode_payload(&mut self, data: &[u8]) -> IndexSet<u32> {
+    fn decode_payload(
+        &mut self,
+        data: &[u8],
+        coordinate_length: u32,
+        offset: u32,
+    ) -> IndexSet<u32> {
         let mut buffer: u32 = 0;
         let mut bit_count = 7;
         let size = self.header.length as usize;
         let mut cells = IndexSet::with_capacity(size);
 
+        let coordinate_length_usize: usize = coordinate_length as usize;
         for byte in data {
             buffer |= (*byte as u32) << 31 - bit_count; // adds next byte to the buffer
             bit_count += BYTE;
 
             // while there is no space to shift, process first 18 bits
             while bit_count >= 24 {
-                let extracted_value = (buffer & 0xFFFFC000) >> 14; // get first 18 bits then shift to right hand side
+                let extracted_value = (buffer & 0xFFFFC000) >> offset; // get first 18 bits then shift to right hand side
 
                 cells.insert(extracted_value);
 
-                buffer <<= 18; // shift buffer to the right by 18 bits
-                bit_count -= 18; // decrease bit count to account for bits just extracted
+                buffer <<= coordinate_length; // shift buffer to the right by 18 bits
+                bit_count -= coordinate_length_usize; // decrease bit count to account for bits just extracted
             }
         }
         return cells;
@@ -142,6 +148,19 @@ impl Packet {
 
     pub async fn decode(&mut self, mut stream: TcpStream) -> Result<IndexSet<u32>, DecodeError> {
         let mut buf = BytesMut::with_capacity(10);
+
+        let coordinate_length = || -> u32 {
+            let mask: u32 = 1;
+            let mut size = 0;
+            let image_size = self.header.image_size as u32;
+            for i in 0..32 as u32 {
+                if image_size & (mask << i) > 0 {
+                    size = i;
+                }
+            }
+            return size * 2;
+        }();
+        let offset = 32 - coordinate_length;
 
         match stream.read_buf(&mut buf).await {
             Ok(0) => {
@@ -167,15 +186,19 @@ impl Packet {
         }
     }
 
-    pub fn encode_payload(&self, cells: IndexSet<u32>) -> Vec<u8> {
+    pub fn encode_payload(
+        &self,
+        cells: IndexSet<u32>,
+        coordinate_length: usize,
+    ) -> Vec<u8> {
         let mut buffer: u32 = 0;
-        let mut bit_count: usize = 17;
+        let mut bit_count: usize = coordinate_length -1;
         let mask: u32 = 0xFF000000;
-        let capacity = cells.len() as f64 * 2.25;
+        let capacity = cells.len() as f64 * (coordinate_length as f64 / 8.0);
         let mut data = Vec::with_capacity(capacity as usize);
         for cell in cells {
             buffer |= cell << 31 - bit_count;
-            bit_count += 18;
+            bit_count += coordinate_length;
             while bit_count >= 32 {
                 let byte = buffer & mask;
                 bit_count -= BYTE;
@@ -235,9 +258,10 @@ fn main() {
 
     let mut packet = Packet { header };
     println!("{:?}", packet);
-    let mut cells_processed = 0;
+    let mut cells_processed: u32 = 0;
+
     let now = Instant::now();
-    let cells = packet.decode_payload(&world);
+    let cells = packet.decode_payload(&world, 18, 14);
     let elapsed = now.elapsed();
     for cell in &cells {
         let x = (cell & 0x3FF00) >> 9;
@@ -254,13 +278,13 @@ fn main() {
     );
 
     let now = Instant::now();
-    let new_payload = packet.encode_payload(cells);
+    let new_payload = packet.encode_payload(cells, 18);
     let elapsed = now.elapsed();
     println!("encoded cells processed in {:.2?} seconds", elapsed);
     println!("{:?}", packet);
     let mut cells_processed = 0;
     let now = Instant::now();
-    let cells = packet.decode_payload(&new_payload);
+    let cells = packet.decode_payload(&new_payload, 18, 14);
     let elapsed = now.elapsed();
     for cell in &cells {
         let x = (cell & 0x3FF00) >> 9;
