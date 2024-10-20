@@ -36,30 +36,32 @@ impl fmt::Display for DecodeError {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
-struct Cell {
-    xy: u32,
+// #[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
+// struct Cell {
+//     xy: u32,
+// }
+trait Cell {
+    fn neighbours(&self, index: usize, image_size: u32) -> usize;
 }
-impl Cell {
-    pub fn new(xy: u32) -> Self {
-        Self { xy }
-    }
 
-    pub fn neighbours(xy: u32, cells: &IndexSet<u32>) -> u8 {
+impl Cell for IndexSet<u32> {
+    fn neighbours(&self, index: usize, image_size: u32) -> usize {
         let mut live_neighbours = 0;
+        let xy = self.get_index(index).unwrap();
+
         let neighbour_positions = vec![
-            xy + 512, // right
-            xy - 512, // left
-            xy + 1,   // up
-            xy - 1,   // down
-            xy + 513, // right up
-            xy + 511, // right down
-            xy - 511, // left down
-            xy - 513, // left up
+            (xy + 512) % image_size, // right
+            (xy - 512) % image_size, // left
+            (xy + 1) % image_size,   // up
+            (xy - 1) % image_size,   // down
+            (xy + 513) % image_size, // right up
+            (xy + 511) % image_size, // right down
+            (xy - 511) % image_size, // left down
+            (xy - 513) % image_size, // left up
         ];
 
         for &pos in &neighbour_positions {
-            if cells.contains(&pos) {
+            if self.contains(&pos) {
                 live_neighbours += 1;
             }
         }
@@ -179,7 +181,7 @@ impl Packet {
             }
             Err(e) => {
                 return Err(DecodeError::Other(format!(
-                    "Failed to read from socket; err = {:?}",
+                    "Failed to read from port; err = {:?}",
                     e
                 )));
             }
@@ -286,18 +288,29 @@ fn main() {
     let now = Instant::now();
     let cells = packet.decode_payload(&new_payload, 18, 14);
     let elapsed = now.elapsed();
-    for cell in &cells {
-        let x = (cell & 0x3FF00) >> 9;
-        let y = cell & 0x1FF;
+
+    let length = cells.len();
+    println!(
+        "{} cells processed in {:.2?} seconds",
+        length, elapsed
+    );
+
+    let now = Instant::now();
+    for i in 0..length {
+        // let cell = cells.get_index(i).unwrap();
+        // let x = (cell & 0x3FF00) >> 9;
+        // let y = cell & 0x1FF;
         // println!("X: {}, {:032b}", x, x);
         // println!("Y: {}, {:032b}", y, y);
 
-        // let live = Cell::neighbours(*cell, &cells);
+        let live = cells.neighbours(i, packet.header.image_size as u32);
 
-        cells_processed += 1;
+
     }
+    let elapsed = now.elapsed();
+
     println!(
-        "{} cells processed in {:.2?} seconds",
-        cells_processed, elapsed
+        "{} cell neigbours processed in {:.2?} seconds",
+        length, elapsed
     );
 }

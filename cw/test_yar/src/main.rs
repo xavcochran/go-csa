@@ -1,5 +1,5 @@
 use serde::{Serialize, Deserialize};
-use serde_json::{to_string, from_str};
+use serde_json::{from_slice, from_str, to_string};
 use std::{collections::HashSet, time::Instant};
 use std::mem;
 #[derive(Serialize, Deserialize, Debug, Eq, Hash, PartialEq)]
@@ -19,7 +19,7 @@ fn main() {
     
     for x in 0..512 {
         for y in 0..512 {
-            
+            cells.insert(Cell { x, y });
         }
     }
     
@@ -27,19 +27,19 @@ fn main() {
     
     // Serialize the world to a JSON string
     let json = to_string(&world).unwrap();
-    
+    let json_bytes = json.as_bytes();
     // Print the JSON string
     let now = Instant::now();
     
     
     // Deserialize the JSON string back into a World struct
-    let deserialized_world: World = from_str(&json).unwrap();
+    let deserialized_world: World = from_slice(json_bytes).unwrap();
     
     // Extract the vector of cells from the deserialized World struct
     let elapsed = now.elapsed();
     let deserialized_cells = deserialized_world.cells;
 
-    println!("{}", deserialized_cells.len());
+    println!("{}", json_bytes.len());
     println!("{:?}", mem::size_of::<String>());
     println!("{}", json.len() * mem::size_of::<String>() );
 
