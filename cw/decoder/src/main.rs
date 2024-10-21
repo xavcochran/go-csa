@@ -16,7 +16,7 @@ const FUNCTION_CALL: usize = 1;
 const MESSAGE_ID: usize = 2;
 const IMAGE_SIZE: usize = 4;
 const LENGTH: usize = 6;
-const CHECKSUM: usize = 10;
+const CHECKSUM: usize = 9;
 
 const PGM_LINE_SIZE: usize = 512;
 const NUM_OF_U64_PER_PGM_LINE: usize = PGM_LINE_SIZE / 64;
@@ -108,7 +108,7 @@ impl Packet {
             // 7th -> 10th byte
             length: || -> u32 {
                 let mut buf: u32 = 0;
-                for byte in &data[LENGTH..LENGTH + 3] {
+                for byte in &data[LENGTH..LENGTH + 2] {
                     let mut bitcount = 7;
                     buf |= (*byte as u32) << 31 - bitcount;
                     bitcount += byte;
