@@ -124,20 +124,22 @@ impl Packet {
         data: &[u8],
         coordinate_length: u32,
         offset: u32,
+
     ) -> IndexSet<u32> {
         let mut buffer: u32 = 0;
         let mut bit_count = 7;
         let size = self.header.length as usize;
         let mut cells = IndexSet::with_capacity(size);
-
+        let mask: u32 = left_fill_ones(coordinate_length);
         let coordinate_length_usize: usize = coordinate_length as usize;
+        let limit = limit(coordinate_length);
         for byte in data {
             buffer |= (*byte as u32) << 31 - bit_count; // adds next byte to the buffer
             bit_count += BYTE;
 
             // while there is no space to shift, process first 18 bits
-            while bit_count >= 24 {
-                let extracted_value = (buffer & 0xFFFFC000) >> offset; // get first 18 bits then shift to right hand side
+            while bit_count >= limit {
+                let extracted_value = (buffer & mask) >> offset; // get first 18 bits then shift to right hand side
 
                 cells.insert(extracted_value);
 
@@ -151,18 +153,7 @@ impl Packet {
     pub async fn decode(&mut self, mut stream: TcpStream) -> Result<IndexSet<u32>, DecodeError> {
         let mut buf = BytesMut::with_capacity(10);
 
-        let coordinate_length = || -> u32 {
-            let mask: u32 = 1;
-            let mut size = 0;
-            let image_size = self.header.image_size as u32;
-            for i in 0..32 as u32 {
-                if image_size & (mask << i) > 0 {
-                    size = i;
-                }
-            }
-            return size * 2;
-        }();
-        let offset = 32 - coordinate_length;
+        let (coordinate_length, offset) = self.calc_coord_len_and_offset();
 
         match stream.read_buf(&mut buf).await {
             Ok(0) => {
@@ -188,14 +179,10 @@ impl Packet {
         }
     }
 
-    pub fn encode_payload(
-        &self,
-        cells: IndexSet<u32>,
-        coordinate_length: usize,
-    ) -> Vec<u8> {
+    pub fn encode_payload(&self, cells: IndexSet<u32>, coordinate_length: usize) -> Vec<u8> {
         let mut buffer: u32 = 0;
-        let mut bit_count: usize = coordinate_length -1;
-        let mask: u32 = 0xFF000000;
+        let mut bit_count: usize = coordinate_length - 1;
+        let mask: u32 = left_fill_ones(coordinate_length as u32);
         let capacity = cells.len() as f64 * (coordinate_length as f64 / 8.0);
         let mut data = Vec::with_capacity(capacity as usize);
         for cell in cells {
@@ -210,27 +197,55 @@ impl Packet {
             }
         }
         while buffer != 0 {
-            let byte = (buffer & 0xFF000000) >> 24;
+            let byte = (buffer & mask) >> 24;
             data.push(byte as u8);
             buffer <<= BYTE;
         }
         data
     }
+
+    pub fn calc_coord_len_and_offset(&mut self) -> (u32, u32) {
+        let coordinate_length = || -> u32 {
+            let mask: u32 = 1;
+            let mut size = 0;
+            let image_size = self.header.image_size as u32;
+            for i in 0..32 as u32 {
+                if image_size & (mask << i) > 0 {
+                    size = i;
+                }
+            }
+            return size * 2;
+        }();
+        let offset = 32 - coordinate_length;
+        return (coordinate_length, offset);
+    }
 }
 
 fn main() {
-    let mut world: Vec<u8> = Vec::with_capacity(512 * 512);
+    let image: u32 = 512;
+    let mut world: Vec<u8> = Vec::with_capacity((image * image) as usize);
     let mut buffer: u32 = 0;
-    let mut bit_count: usize = 17;
-    let mask: u32 = 0xFF000000;
-    for x in 0..512 as u32 {
-        for y in 0..512 as u32 {
-            let new_num: u32 = x << 9 as u32 | y;
-            let shifted_num = new_num << 31 - bit_count;
-            buffer = buffer | shifted_num;
-
-            bit_count += 18;
-
+    let coordinate_length = || -> u32 {
+        let mask: u32 = 1;
+        let mut size = 0;
+        let image_size = image;
+        for i in 0..32 as u32 {
+            if image_size & (mask << i) > 0 {
+                size = i;
+            }
+        }
+        return size * 2;
+    }();
+    let mut bit_count: usize = coordinate_length as usize - 1;
+    let offset = 32 - coordinate_length;
+    let mask: u32 = left_fill_ones(coordinate_length);
+    println!("{:032b}", mask);
+    let indiv_len = coordinate_length / 2;
+    for x in 0..image as u32 {
+        for y in 0..image as u32 {
+            let new_num: u32 = x << indiv_len as u32 | y;
+            buffer |= new_num << 31 - bit_count;
+            bit_count += coordinate_length as usize;
             while bit_count >= 32 {
                 let byte = buffer & mask;
                 bit_count -= BYTE;
@@ -242,7 +257,7 @@ fn main() {
     }
 
     while buffer != 0 {
-        let byte = (buffer & 0xFF000000) >> 24;
+        let byte = (buffer & mask) >> 24;
         world.push(byte as u8);
         buffer <<= BYTE;
     }
@@ -253,7 +268,7 @@ fn main() {
         version: 0,
         fn_call: 0,
         msg_id: 0,
-        image_size: 512,
+        image_size: image as u16,
         length: world.len().clone() as u32,
         checksum: 0,
     };
@@ -263,11 +278,11 @@ fn main() {
     let mut cells_processed: u32 = 0;
 
     let now = Instant::now();
-    let cells = packet.decode_payload(&world, 18, 14);
+    let cells = packet.decode_payload(&world, coordinate_length, offset);
     let elapsed = now.elapsed();
     for cell in &cells {
-        let x = (cell & 0x3FF00) >> 9;
-        let y = cell & 0x1FF;
+        // let x = (cell & 0x3FF00) >> 9;
+        // let y = cell & 0x1FF;
         // println!("X: {}, {:032b}", x, x);
 
         // let live = Cell::neighbours(*cell, &cells);
@@ -280,20 +295,17 @@ fn main() {
     );
 
     let now = Instant::now();
-    let new_payload = packet.encode_payload(cells, 18);
+    let new_payload = packet.encode_payload(cells, coordinate_length as usize);
     let elapsed = now.elapsed();
     println!("encoded cells processed in {:.2?} seconds", elapsed);
     println!("{:?}", packet);
     let mut cells_processed = 0;
     let now = Instant::now();
-    let cells = packet.decode_payload(&new_payload, 18, 14);
+    let cells = packet.decode_payload(&new_payload, coordinate_length, offset);
     let elapsed = now.elapsed();
 
     let length = cells.len();
-    println!(
-        "{} cells processed in {:.2?} seconds",
-        length, elapsed
-    );
+    println!("{} cells processed in {:.2?} seconds", length, elapsed);
 
     let now = Instant::now();
     for i in 0..length {
@@ -304,8 +316,6 @@ fn main() {
         // println!("Y: {}, {:032b}", y, y);
 
         let live = cells.neighbours(i, packet.header.image_size as u32);
-
-
     }
     let elapsed = now.elapsed();
 
@@ -313,4 +323,22 @@ fn main() {
         "{} cell neigbours processed in {:.2?} seconds",
         length, elapsed
     );
+}
+
+fn left_fill_ones(n: u32) -> u32 {
+    if n > 32 {
+        panic!("n must be less than or equal to 32");
+    }
+    let mask = !0u32; // All bits set to 1
+    mask << (32 - n)
+}
+
+fn limit(coordinate_length: u32) -> usize {
+    if coordinate_length > 16 {
+        24
+    } else if coordinate_length < 16 && coordinate_length > 8 {
+        16
+    } else {
+        8
+    }
 }
