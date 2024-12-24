@@ -1,7 +1,11 @@
 use bytes::{buf, BytesMut};
+use csv::{Writer, WriterBuilder};
 use indexmap::IndexSet;
 use std::fmt::Error;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::time::Instant;
+
 use std::{cell, fmt};
 use std::{fs::read, vec};
 use tokio::{io::AsyncReadExt, net::TcpStream};
@@ -128,9 +132,10 @@ impl Packet {
     ) -> IndexSet<u32> {
         let mut buffer: u32 = 0;
         let mut bit_count = 7;
-        let size = self.header.length as usize;
+        let size = (self.header.length / (coordinate_length/8) )as usize;
+        println!("{} {}",self.header.length, coordinate_length);
         let mut cells = IndexSet::with_capacity(size);
-        let mask: u32 = left_fill_ones(coordinate_length);
+        let mask: u32 = generate_mask(coordinate_length);
         let coordinate_length_usize: usize = coordinate_length as usize;
         let limit = limit(coordinate_length);
         for byte in data {
@@ -182,7 +187,7 @@ impl Packet {
     pub fn encode_payload(&self, cells: IndexSet<u32>, coordinate_length: usize) -> Vec<u8> {
         let mut buffer: u32 = 0;
         let mut bit_count: usize = coordinate_length - 1;
-        let mask: u32 = left_fill_ones(coordinate_length as u32);
+        let mask: u32 = generate_mask(coordinate_length as u32);
         let capacity = cells.len() as f64 * (coordinate_length as f64 / 8.0);
         let mut data = Vec::with_capacity(capacity as usize);
         for cell in cells {
@@ -220,26 +225,15 @@ impl Packet {
         return (coordinate_length, offset);
     }
 }
-
-fn main() {
+fn test(run: i32, wtr: &mut Writer<File>) {
     let image: u32 = 512;
     let mut world: Vec<u8> = Vec::with_capacity((image * image) as usize);
     let mut buffer: u32 = 0;
-    let coordinate_length = || -> u32 {
-        let mask: u32 = 1;
-        let mut size = 0;
-        let image_size = image;
-        for i in 0..32 as u32 {
-            if image_size & (mask << i) > 0 {
-                size = i;
-            }
-        }
-        return size * 2;
-    }();
+    let coordinate_length = (32 - image.leading_zeros()) * 2;
+    println!("{:032b}", coordinate_length);
     let mut bit_count: usize = coordinate_length as usize - 1;
     let offset = 32 - coordinate_length;
-    let mask: u32 = left_fill_ones(coordinate_length);
-    println!("{:032b}", mask);
+    let mask: u32 = generate_mask(coordinate_length);
     let indiv_len = coordinate_length / 2;
     for x in 0..image as u32 {
         for y in 0..image as u32 {
@@ -277,66 +271,78 @@ fn main() {
     println!("{:?}", packet);
     let mut cells_processed: u32 = 0;
 
+
     let now = Instant::now();
-    let cells = packet.decode_payload(&world, coordinate_length, offset);
-    let elapsed = now.elapsed();
-    for cell in &cells {
-        // let x = (cell & 0x3FF00) >> 9;
-        // let y = cell & 0x1FF;
-        // println!("X: {}, {:032b}", x, x);
-
-        // let live = Cell::neighbours(*cell, &cells);
-
-        cells_processed += 1;
-    }
+    let cells =packet.decode_payload(&world, coordinate_length, offset);
+    let elapsed_decode = now.elapsed();
+    
     println!(
-        "{} cells processed in {:.2?} seconds",
-        cells_processed, elapsed
+        "cells decoded in {:.2?} seconds",elapsed_decode
     );
 
     let now = Instant::now();
     let new_payload = packet.encode_payload(cells, coordinate_length as usize);
-    let elapsed = now.elapsed();
-    println!("encoded cells processed in {:.2?} seconds", elapsed);
-    println!("{:?}", packet);
-    let mut cells_processed = 0;
-    let now = Instant::now();
-    let cells = packet.decode_payload(&new_payload, coordinate_length, offset);
-    let elapsed = now.elapsed();
+    let elapsed_encode = now.elapsed();
+    println!("encoded cells processed in {:.2?} seconds", elapsed_encode);
 
-    let length = cells.len();
-    println!("{} cells processed in {:.2?} seconds", length, elapsed);
 
     let now = Instant::now();
-    for i in 0..length {
-        // let cell = cells.get_index(i).unwrap();
-        // let x = (cell & 0x3FF00) >> 9;
-        // let y = cell & 0x1FF;
-        // println!("X: {}, {:032b}", x, x);
-        // println!("Y: {}, {:032b}", y, y);
+    packet.decode_payload(&world, coordinate_length, offset);
+    let elapsed_decode_again = now.elapsed();
 
-        let live = cells.neighbours(i, packet.header.image_size as u32);
+
+
+    wtr.write_record(&[
+        "Decode",
+        &format!("{:?}", run),
+        &format!("{:.2?}", elapsed_decode),
+    ])
+    .unwrap();
+    wtr.write_record(&[
+        "Encode",
+        &format!("{:?}", run),
+        &format!("{:.2?}", elapsed_encode),
+    ])
+    .unwrap();
+    wtr.write_record(&[
+        "Decode",
+        &format!("{:?}", run),
+        &format!("{:.2?}", elapsed_decode_again),
+    ])
+    .unwrap();
+    wtr.flush().unwrap();
+}
+fn main() {
+    let file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .create(true)
+        .open("results.csv")
+        .unwrap();
+    let mut wtr = WriterBuilder::new().has_headers(false).from_writer(file);
+    wtr.write_record(&["Operation", "Run", "Time (seconds)"])
+        .unwrap();
+    for i in 0..2000 {
+        test(i, &mut wtr)
     }
-    let elapsed = now.elapsed();
-
-    println!(
-        "{} cell neigbours processed in {:.2?} seconds",
-        length, elapsed
-    );
 }
 
-fn left_fill_ones(n: u32) -> u32 {
-    if n > 32 {
-        panic!("n must be less than or equal to 32");
+/// generates mask of left aligned 1's where there are `coordinate_length` number of 1's
+fn generate_mask(coordinate_length: u32) -> u32 {
+    if coordinate_length > 32 {
+        panic!("coordinate length must be less than or equal to 32");
     }
-    let mask = !0u32; // All bits set to 1
-    mask << (32 - n)
+    let mask = !0u32;
+    mask << (32 - coordinate_length)
 }
 
+/// returns the limit the decoder should wait for the bit count to reach before continuing to next chunk
 fn limit(coordinate_length: u32) -> usize {
-    if coordinate_length > 16 {
+    if coordinate_length > 24 {
+        32
+    } else if coordinate_length > 16 {
         24
-    } else if coordinate_length < 16 && coordinate_length > 8 {
+    } else if coordinate_length > 8 {
         16
     } else {
         8

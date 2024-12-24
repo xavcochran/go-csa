@@ -226,3 +226,153 @@ const styles = StyleSheet.create({
                                                  +-------+   
                                                  | Venue |
                                                  +-------+
+
+
+
+
+To ensure that your code waits for the corresponding response and not just any message from the TCP stream, you need to implement a mechanism that matches each response to its original request. This is commonly achieved by assigning a unique message ID to each request and using it to correlate the response.
+
+Here's how you can implement this:
+
+Assign a Unique Message ID: Before sending a request, generate a unique message ID and include it in the request header.
+Create a Pending Requests Map: Use a shared, thread-safe data structure (like Arc<Mutex<HashMap<u32, oneshot::Sender<ResponseType>>>>) to keep track of pending requests. The key is the message ID, and the value is a channel sender that will be used to deliver the response.
+Send the Request and Wait for the Response:
+Insert the message ID and the channel sender into the pending requests map.
+Send the request over the TCP stream.
+Wait for the response by awaiting the receiver end of the channel.
+Read Responses in a Background Task:
+Start a background task that continuously reads from the TCP stream.
+When a response is received, extract the message ID.
+Use the message ID to find the corresponding channel sender in the pending requests map.
+Send the response through the channel, allowing the original task to resume.
+Here's a concrete example incorporating these steps:
+
+```rust
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::net::TcpStream;
+use tokio::sync::{Mutex, oneshot};
+use futures::StreamExt;
+
+type ResponseType = IndexSet<u32>;
+type ErrorType = Box<dyn std::error::Error + Send + Sync>;
+
+struct Client {
+    stream: TcpStream,
+    pending_requests: Arc<Mutex<HashMap<u32, oneshot::Sender<ResponseType>>>>,
+    msg_id_counter: Arc<Mutex<u32>>,
+}
+
+impl Client {
+    async fn new(stream: TcpStream) -> Self {
+        Self {
+            stream,
+            pending_requests: Arc::new(Mutex::new(HashMap::new())),
+            msg_id_counter: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    async fn get_next_msg_id(&self) -> u32 {
+        let mut counter = self.msg_id_counter.lock().await;
+        *counter += 1;
+        *counter
+    }
+
+    async fn send_request(
+        &self,
+        params: PacketParams,
+        request_data: &[u8],
+    ) -> Result<ResponseType, ErrorType> {
+        let msg_id = params.msg_id;
+
+        // Create a oneshot channel
+        let (tx, rx) = oneshot::channel();
+
+        // Insert the sender into the pending_requests map
+        {
+            let mut pending = self.pending_requests.lock().await;
+            pending.insert(msg_id, tx);
+        }
+
+        // Send the request over the stream
+        self.stream.write_all(request_data).await?;
+
+        // Await the response
+        match rx.await {
+            Ok(response) => Ok(response),
+            Err(_) => Err("Response channel closed unexpectedly".into()),
+        }
+    }
+
+    async fn start_response_reader(self: Arc<Self>) {
+        let mut reader = tokio::io::BufReader::new(&self.stream);
+        loop {
+            // Read and parse the response
+            let mut buffer = vec![0; 1024];
+            let n = reader.read(&mut buffer).await.unwrap();
+            if n == 0 {
+                break; // Connection closed
+            }
+
+            // Extract msg_id and response_data from buffer
+            let (msg_id, response_data) = parse_response(&buffer[..n]);
+
+            // Find the pending request and send the response
+            let tx_opt = {
+                let mut pending = self.pending_requests.lock().await;
+                pending.remove(&msg_id)
+            };
+
+            if let Some(tx) = tx_opt {
+                let _ = tx.send(response_data);
+            } else {
+                // Handle unknown msg_id
+            }
+        }
+    }
+}
+
+// Usage in your worker function
+async fn worker_process_slice_request(
+    client: Arc<Client>,
+    args: ProcessSliceArgs,
+    response_channel: Sender<IndexSet<u32>>,
+) -> Result<(), ErrorType> {
+    let msg_id = client.get_next_msg_id().await;
+    let params = PacketParams {
+        fn_call_id: FunctionCall::PROCESS_SLICE,
+        msg_id,
+        image_size: args.params.image_width as u16,
+    };
+
+    let packet = Packet::new();
+    let request_data = packet.encode(params, &IndexSet::new())?;
+
+    // Send the request and wait for the response
+    match client.send_request(params, &request_data).await {
+        Ok(response_data) => {
+            response_channel.send(response_data).await?;
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+```
+In this example:
+
+Client Structure: Holds the TCP stream and a map of pending requests.
+send_request Method: Sends the request and waits for the corresponding response using a oneshot channel.
+start_response_reader Method: Continuously reads from the TCP stream and dispatches responses to the appropriate request handlers.
+worker_process_slice_request Function: Generates a unique message ID, sends the request, and waits for the response.
+Key Points:
+
+Unique Message IDs: Ensure that each request can be matched to its response.
+Pending Requests Map: Allows the background reader to deliver responses to the correct awaiting tasks.
+Asynchronous Communication: Utilizes async/await and channels to handle concurrent operations without blocking.
+Benefits of This Approach:
+
+Concurrency: Multiple requests can be sent and awaited concurrently without interference.
+Scalability: The system can handle a high volume of requests and responses efficiently.
+Robustness: Proper error handling and cleanup mechanisms can be added to handle network failures or unexpected conditions.
+By implementing this mechanism, you ensure that your code waits for the specific response corresponding to each request, maintaining the integrity and reliability of your RPC implementation.

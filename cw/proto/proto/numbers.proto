@@ -1,0 +1,6 @@
+syntax = "proto3";
+package numbers;
+
+message NumberArray {
+    repeated fixed32 values = 1 [packed = true];
+}
